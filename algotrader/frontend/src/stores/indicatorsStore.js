@@ -37,13 +37,15 @@ export const useIndicatorsStore = defineStore('indicators', {
 
     addIndicator(info, data, parameters = {}) {
       const id = String(Date.now());
-      let finalParameters = { ...parameters };
-
-      for (const [key, paramInfo] of Object.entries(info.parameters)) {
-        finalParameters[key] = {
-          ...paramInfo,
-          value: paramInfo.default,
-        };
+      // Start with provided parameters; only fill missing keys with defaults
+      const finalParameters = { ...parameters };
+      for (const [key, paramInfo] of Object.entries(info.parameters || {})) {
+        if (!(key in finalParameters) || finalParameters[key]?.value === undefined) {
+          finalParameters[key] = { ...paramInfo, value: paramInfo.default };
+        } else {
+          // Ensure other metadata from paramInfo exists while keeping provided value
+          finalParameters[key] = { ...paramInfo, value: finalParameters[key].value };
+        }
       }
 
       const indicator = {
@@ -63,8 +65,9 @@ export const useIndicatorsStore = defineStore('indicators', {
 
     updateIndicatorData(id, newData) {
       const indicator = this.indicators.get(id);
-
+      if (!indicator) return false;
       indicator.data = [...newData];
+      return true;
     },
 
     updateIndicatorParameters(id, newParameters) {

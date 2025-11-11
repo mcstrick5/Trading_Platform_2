@@ -66,6 +66,7 @@ export default {
       candlestickOhlc: undefined,
       isFetchingCandles: false,
       candlesFetchLimit: 5000,
+      isRestoringIndicators: false,
     };
   },
 
@@ -85,24 +86,20 @@ export default {
     },
 
     "currentMarketStore.symbol_id": {
-      handler() {
+      handler(newVal, oldVal) {
+        console.log('[WATCHER] Symbol changed from', oldVal, 'to', newVal);
+        this.saveIndicatorsForContext(oldVal, this.currentTimeframeStore.value);
         this.fetchCandlesticks();
-        // Save current context before switching
-        this.saveIndicatorsForContext();
-        // Clear indicators when switching symbol; they'll be restored if saved for this context
-        this.clearIndicatorsForContext();
         this.restoreIndicatorsForContext();
       },
       immediate: true,
     },
 
     "currentTimeframeStore.value": {
-      handler() {
+      handler(newVal, oldVal) {
+        console.log('[WATCHER] Timeframe changed from', oldVal, 'to', newVal);
+        this.saveIndicatorsForContext(this.currentMarketStore.symbol_id, oldVal);
         this.fetchCandlesticks();
-        // Save current context before switching
-        this.saveIndicatorsForContext();
-        // Clear indicators when switching timeframe; they'll be restored if saved for this context
-        this.clearIndicatorsForContext();
         this.restoreIndicatorsForContext();
       },
       immediate: true,
@@ -119,7 +116,7 @@ export default {
   mounted() {
     this.initializeChartComponent();
     window.addEventListener('keydown', this.onKeyDown);
-    window.addEventListener('beforeunload', this.saveIndicatorsForContext);
+    window.addEventListener('beforeunload', () => this.saveIndicatorsForContext());
   },
 
   methods: {
@@ -143,7 +140,6 @@ export default {
 
       await this.candlesticksStore.fetch(symbolID, timeframe, null, null, this.candlesFetchLimit);
       // After candles fetched, ensure indicators render for this context
-      this.clearIndicatorsForContext();
       this.restoreIndicatorsForContext();
     },
 
@@ -221,23 +217,42 @@ export default {
       return this.indicatorsStore.all;
     },
 
-    // ===== Indicator persistence =====
-    storageKey() {
-      const sym = this.currentMarketStore.symbol; // use symbol text for CSV mode
-      const tf = this.currentTimeframeStore.value;
-      return sym == null || tf == null ? null : `indicators:v2:${sym}:${tf}`;
+    storageMapKey() {
+      return "indicators:v3";
     },
-    saveIndicatorsForContext() {
+    makeContextKey(symId, tf) {
+      return symId == null || tf == null ? null : `${symId}:${tf}`;
+    },
+    readStorageMap() {
       try {
-        const key = this.storageKey();
-        if (!key) return;
+        const raw = localStorage.getItem(this.storageMapKey());
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch { return {}; }
+    },
+    writeStorageMap(map) {
+      try { localStorage.setItem(this.storageMapKey(), JSON.stringify(map)); } catch {}
+    },
+    saveIndicatorsForContext(symIdOverride = null, tfOverride = null) {
+      try {
+        const symId = symIdOverride ?? this.currentMarketStore.symbol_id;
+        const tf = tfOverride ?? this.currentTimeframeStore.value;
+        const ctxKey = this.makeContextKey(symId, tf);
+        console.log('[SAVE] Context key:', ctxKey, 'Indicators count:', this.indicatorsStore.all.length);
+        if (!ctxKey) return;
         const payload = this.indicatorsStore.all.map(ind => ({
           info: ind.info,
           parameters: Object.fromEntries(Object.entries(ind.parameters || {}).map(([k,v]) => [k, v?.value])),
           visible: ind.visible !== false,
         }));
-        localStorage.setItem(key, JSON.stringify({ list: payload }));
-      } catch {}
+        const map = this.readStorageMap();
+        map[ctxKey] = { list: payload };
+        this.writeStorageMap(map);
+        console.log('[SAVE] Saved to storage:', JSON.stringify(map, null, 2));
+      } catch (e) {
+        console.error('[SAVE] Error:', e);
+      }
     },
     clearIndicatorsForContext() {
       try {
@@ -249,18 +264,29 @@ export default {
     },
     async restoreIndicatorsForContext() {
       try {
-        const key = this.storageKey();
-        if (!key) return;
-        const raw = localStorage.getItem(key);
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed?.list)) return;
+        if (this.isRestoringIndicators) return;
+        this.isRestoringIndicators = true;
+        const symId = this.currentMarketStore.symbol_id;
+        const tf = this.currentTimeframeStore.value;
+        const ctxKey = this.makeContextKey(symId, tf);
+        console.log('[RESTORE] Context key:', ctxKey);
+        if (!ctxKey) return;
+        const map = this.readStorageMap();
+        console.log('[RESTORE] Full storage map:', JSON.stringify(map, null, 2));
+        const entry = map[ctxKey];
+        console.log('[RESTORE] Entry for context:', entry);
+        if (!entry || !Array.isArray(entry.list)) {
+          console.log('[RESTORE] No indicators to restore for this context');
+          this.clearIndicatorsForContext();
+          return;
+        }
         
         // Clear any existing indicators first
         this.clearIndicatorsForContext();
+        console.log('[RESTORE] Restoring', entry.list.length, 'indicators');
         
         // Recreate indicators for this context
-        for (const item of parsed.list) {
+        for (const item of entry.list) {
           const params = {};
           for (const [k, v] of Object.entries(item.parameters || {})) {
             params[k] = { value: v };
@@ -283,6 +309,7 @@ export default {
               );
               if (resp.ok) {
                 const series = await resp.json();
+                // Only update if indicator still exists (avoid race conditions)
                 this.indicatorsStore.updateIndicatorData(id, series);
                 this.$nextTick(() => {
                   if (this.indicatorManager) {
@@ -297,6 +324,8 @@ export default {
         }
       } catch (error) {
         console.error('Error restoring indicators:', error);
+      } finally {
+        this.isRestoringIndicators = false;
       }
     },
     mapNameToCode(name) {
