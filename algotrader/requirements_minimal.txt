@@ -1,0 +1,11 @@
+python-decouple>=3.8
+pandas
+numpy
+websockets
+watchdog
+requests
+pandas-ta
+python-dateutil
+pytz
+tzdata
+MetaTrader5

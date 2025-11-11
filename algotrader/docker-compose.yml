@@ -1,0 +1,78 @@
+services:
+  database-accessor-api:
+    container_name: database-accessor-api
+    build: 
+      context: ./database-accessor-api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./database-accessor-api:/app
+    depends_on:
+      - timescaledb
+    env_file:
+      - .env
+    restart: always
+
+  timescaledb:
+    container_name: timescaledb
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - 5432:5432
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./timescaledb-init:/docker-entrypoint-initdb.d
+
+  backend:
+    container_name: backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+      - 8765:8765
+    volumes:
+      - frontend_data:/app/frontend/dist
+      - backend_data:/app
+      - ./backend:/app/backend
+      - /app/backend/node_modules
+    environment:
+      - MODE=${MODE}
+
+  frontend:
+    container_name: frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - 5173:5173
+    volumes:
+      - frontend_data:/app/dist
+      - ./frontend:/app/frontend    
+    depends_on:
+      - backend
+    environment:
+      - MODE=${MODE}
+
+  backtester:
+    container_name: backtester
+    build:
+      context: ./backtester
+      dockerfile: Dockerfile
+    volumes:
+      - ./backtester:/app
+    depends_on:
+      - backend
+    command: watchmedo auto-restart --directory=/app --pattern="*.py" --recursive -- python main.py
+    environment:
+      - PYTHONUNBUFFERED=1
+
+
+volumes:
+  timescaledb_data:
+  frontend_data:
+  backend_data:
+
