@@ -6,6 +6,7 @@ import {
   createChart,
   HistogramSeries,
   LineSeries,
+  LineStyle,
 } from 'lightweight-charts';
 
 export class ChartManager {
@@ -94,7 +95,14 @@ export class ChartManager {
       { time: a.time, value: a.price },
       { time: b.time, value: b.price },
     ];
-    const seriesOptions = { lineWidth: 2, color: '#f5a524', priceFormat: { minMove: 0.00001 }, ...options };
+    const seriesOptions = { 
+      lineWidth: 2, 
+      color: '#ffffff', 
+      lineStyle: 0, // 0 = Solid (using numeric value instead of enum)
+      lineType: 0, // Simple line (not stepped)
+      lastValueVisible: false, // Hide value labels
+      ...options 
+    };
     return this.addSeries(key, 'line', data, seriesOptions, 0);
   }
 
@@ -129,6 +137,12 @@ export class ChartManager {
     }
   }
 
+  setCrosshairEnabled(enabled) {
+    if (this.chart) {
+      this.chart.applyOptions({ crosshair: { vertLine: { visible: enabled }, horzLine: { visible: enabled } } });
+    }
+  }
+
   unsubscribeClick(callback) {
     if (this.chart) {
       this.chart.unsubscribeClick(callback);
@@ -142,8 +156,29 @@ export class ChartManager {
   priceFromY(y) {
     const s = this.getMainSeries();
     try {
-      return s?.priceScale()?.coordinateToPrice(y) ?? null;
-    } catch {
+      // Try different methods based on lightweight-charts version
+      let price = null;
+      
+      // Method 1: Try coordinateToPrice on price scale
+      if (s?.priceScale()?.coordinateToPrice) {
+        price = s.priceScale().coordinateToPrice(y);
+      }
+      
+      // Method 2: Try coordinateToPrice on series (newer versions)
+      if (!price && s?.coordinateToPrice) {
+        price = s.coordinateToPrice(y);
+      }
+      
+      // Method 3: Use the chart's price scale API
+      if (!price && this.chart) {
+        const priceScale = this.chart.priceScale('right');
+        if (priceScale?.coordinateToPrice) {
+          price = priceScale.coordinateToPrice(y);
+        }
+      }
+      
+      return price;
+    } catch (e) {
       return null;
     }
   }

@@ -4,11 +4,10 @@ export const useDrawingsStore = defineStore('drawings', {
   state: () => ({
     drawMode: false,
     gridOn: false,
-    tool: 'chart', // 'chart' | 'freehand'
-    // Lines can be time/price or pixel-relative
-    // time/price form: { id, a: { time, price }, b: { time, price } }
-    // pixel form: { id, type: 'px', a: { xRel, yRel }, b: { xRel, yRel } }
+    tool: 'chart', // 'chart' | 'trendline' | 'horizontal' | 'vertical'
+    // Lines: { id, type: 'trendline'|'horizontal'|'vertical', a: { time, price }, b: { time, price }, color, lineWidth }
     lines: [],
+    selectedLineId: null,
   }),
   getters: {
     allLines: (s) => s.lines,
@@ -21,7 +20,8 @@ export const useDrawingsStore = defineStore('drawings', {
       this.drawMode = !!val;
     },
     setTool(tool) {
-      this.tool = tool === 'freehand' ? 'freehand' : 'chart';
+      const validTools = ['chart', 'trendline', 'horizontal', 'vertical'];
+      this.tool = validTools.includes(tool) ? tool : 'chart';
     },
     toggleGrid() {
       this.gridOn = !this.gridOn;
@@ -29,9 +29,16 @@ export const useDrawingsStore = defineStore('drawings', {
     setGrid(val) {
       this.gridOn = !!val;
     },
-    addLine(a, b) {
+    addLine(a, b, type = 'trendline', options = {}) {
       const id = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-      const line = { id, a, b };
+      const line = { 
+        id, 
+        type, 
+        a, 
+        b,
+        color: options.color || '#f5a524',
+        lineWidth: options.lineWidth || 2,
+      };
       this.lines.push(line);
       return id;
     },
@@ -49,9 +56,25 @@ export const useDrawingsStore = defineStore('drawings', {
     },
     removeLine(id) {
       this.lines = this.lines.filter(l => l.id !== id);
+      if (this.selectedLineId === id) {
+        this.selectedLineId = null;
+      }
+    },
+    updateLine(id, updates) {
+      const line = this.lines.find(l => l.id === id);
+      if (line) {
+        Object.assign(line, updates);
+      }
+    },
+    selectLine(id) {
+      this.selectedLineId = id;
+    },
+    deselectLine() {
+      this.selectedLineId = null;
     },
     clear() {
       this.lines = [];
+      this.selectedLineId = null;
     },
     saveFor(symbol, timeframe) {
       try {
